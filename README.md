@@ -1,6 +1,79 @@
-# Chatterbox
+<p align="center">
+  <img src="images/logo.png" alt="Chatterbox" width="200">
+</p>
 
-Synthetic, **fuzzy** log lines for testing log aggregation pipelines, indexers, and PII rules. Define a schema in Go, attach fuzzers per field, and stream reproducible JSON Lines.
+<h1 align="center">Chatterbox</h1>
+
+<p align="center">
+  Synthetic, <strong>fuzzy</strong> log data for testing aggregation pipelines, indexers, and PII rules.
+</p>
+
+<p align="center">
+  <a href="docs/GUIDE.md">Full guide</a> ·
+  <a href="examples/">Examples</a>
+</p>
+
+---
+
+## Features
+
+### Core
+
+- **Schema-driven logs** — declare fields in Go; each field uses a pluggable fuzzer
+- **Reproducible output** — `WithSeed(uint64)` for deterministic sequences in tests
+- **Custom fuzzers** — implement `fuzz.Fuzzer` or use `fuzz.Func` for one-off fields
+
+### Fuzzy data generators
+
+| Fuzzer | What it produces |
+|--------|------------------|
+| `fuzz.Email` | Realistic emails (typos, subdomains, optional invalid edge cases) |
+| `fuzz.TimestampRFC3339` | Timestamps with jitter and fixed base time |
+| `fuzz.LevelWeighted` | Weighted log levels (`info`, `warn`, `error`, …) |
+| `fuzz.StringFrom` | Random alphanumeric messages |
+| `fuzz.UUID` | UUID v4-style strings |
+| `fuzz.IPv4` | IPv4 addresses (optional RFC1918 ranges) |
+| `fuzz.URL` | HTTP/HTTPS URLs |
+| `fuzz.StackTrace` | Multiline stacks (`go`, `java`, `python` styles) |
+| `fuzz.Choice` / `fuzz.Weighted` / `fuzz.Optional` | Composable helpers |
+
+### Output formats (`emit`)
+
+| Format | Use case |
+|--------|----------|
+| `json` (default) | JSON Lines — ELK, Loki, CloudWatch |
+| `logfmt` | `key=value` — Loki logfmt, grep-friendly |
+| `plain` | Human-readable single lines |
+| `syslog` | RFC5424-style syslog |
+| `cef` | ArcSight CEF for SIEM |
+| `multiline` | Physical multiline events (header + body lines) |
+| `slog_json` / `slog_text` | Match `log/slog` handler output |
+| `zap_json` | Match Zap production JSON |
+| `zerolog_json` | Match Zerolog JSON |
+
+### Emission modes
+
+| Mode | API | Best for |
+|------|-----|----------|
+| **Batch** | `WriteN`, `NextN`, `GenerateN` | Fixtures, unit tests |
+| **Flat rate stream** | `Stream`, `StreamRecords` | Steady load to stdout or a live collector |
+| **Phased / burst rates** | `schedule.NewPhases`, `PresetIncidentSpike`, `NewStreamWithSchedule` | Incident spikes, ramp up/down |
+| **Record callback** | `StreamRecords`, `GenerateN` + `RecordHandler` | Log through **your** slog, zap, logrus, etc. |
+| **Logger adapters** | `adapter/slog`, `adapter/zap`, `adapter/zerolog` | Byte-identical output from real libraries |
+
+### Trace correlation
+
+- **`WithCorrelation`** — N consecutive lines share `trace_id`, `request_id`, and optional `span_id`
+- Optional **`TimestampStep`** so lines within a trace sort correctly
+- Works with multiline stack traces and any formatter
+
+### Production-realistic testing
+
+- Logger-shaped JSON without importing zap/zerolog in your test binary
+- Pass records to your existing logging stack (hooks, sampling, formatters apply)
+- Load-test Filebeat multiline rules, trace queries in Loki/Tempo, PII on fuzzy emails
+
+---
 
 ## Install
 
@@ -10,7 +83,9 @@ go get github.com/Haydn202/Chatterbox
 
 Requires Go 1.22+ (`math/rand/v2`).
 
-**Full documentation:** [docs/GUIDE.md](docs/GUIDE.md) — architecture, all fuzzers, formatters, emission modes, adapters, and testing.
+**Deep dive:** [docs/GUIDE.md](docs/GUIDE.md)
+
+---
 
 ## Quickstart
 
@@ -40,62 +115,70 @@ func main() {
 }
 ```
 
-## API
+---
 
-| Type | Role |
-|------|------|
-| `Schema` / `MakeField` | Ordered log fields and fuzzers |
-| `Generator` | `Next()`, `GenerateN()`, `StreamRecords()`, `NextFormatted()`, `WriteN()`, … |
-| `Stream` | `Run(ctx, w)` — formatted bytes at a rate or `schedule` |
-| `WithCorrelation` | Shared `trace_id` / `request_id` across N consecutive lines |
-| `schedule` | Phased rates (`NewPhases`, `PresetIncidentSpike`) |
-| `RecordHandler` | Callback to log records with your own logger |
-| `fuzz.Fuzzer` | Pluggable value generation |
-| `emit.Formatter` | Encode records (pluggable) |
-| `emit.Format` | `json`, `logfmt`, `plain`, `syslog`, `cef`, `multiline`, `slog_json`, `zap_json`, … |
-| `adapter` | Optional helpers for slog, zap, zerolog |
+## Examples
 
-Use `chatterbox.WithSeed(uint64)` for reproducible sequences in tests.
+| Example | Demonstrates |
+|---------|----------------|
+| [stream_records_slog](examples/stream_records_slog/main.go) | `StreamRecords` + manual slog mapping |
+| [stream_slog](examples/stream_slog/main.go) | `adapter/slog` + phased stream |
+| [incident_burst](examples/incident_burst/main.go) | Correlation + incident spike + slog |
 
-## Output formats
+```bash
+go run ./examples/incident_burst
+```
 
-Pass a formatter to `chatterbox.WithFormatter`, or use `emit.NewFormatter` / `chatterbox.WithOutputFormat`:
+---
 
-| Format | Description | Example use |
-|--------|-------------|-------------|
-| `json` (default) | One JSON object per line | ELK, Loki, CloudWatch |
-| `logfmt` | `key=value` pairs | Grafana Loki (logfmt), structured grep |
-| `plain` | `timestamp LEVEL message key=value` | Human tailing, simple parsers |
-| `syslog` | RFC5424-style line | Syslog-ng, rsyslog, network collectors |
-| `cef` | ArcSight CEF | SIEM (QRadar, Sentinel CEF) |
-| `multiline` | Header line + body fields on following lines | Filebeat multiline rules |
-| `slog_json` | `slog.JSONHandler` field names (`time`, `level`, `msg`) | Loki/ELK when apps use slog JSON |
-| `slog_text` | `slog.TextHandler` key=value line | Text slog apps |
-| `zap_json` | Zap production JSON (`ts`, `caller`, `msg`) | Zap-based services |
-| `zerolog_json` | Zerolog JSON (`time`, `level`, `message`) | Zerolog services |
+## Correlation
 
-## Go loggers and production-realistic output
-
-Go services commonly use **slog**, **zap**, **zerolog**, or **logrus**. Chatterbox supports three integration styles:
-
-| Style | API | Best for |
-|-------|-----|----------|
-| **Callback (recommended in-app)** | `GenerateN` / `StreamRecords` + `RecordHandler` | Your app logs with its existing logger; hooks and sampling apply |
-| **Format presets** | `emit.FormatSlogJSON`, `FormatZapJSON`, … + `Stream` | Pipe realistic lines to stdout/agents without importing a logger |
-| **Adapters** | `adapter/slog`, `adapter/zap`, `adapter/zerolog` | Less boilerplate; output goes through the real library |
-
-### Callback — any logger
+Group related log lines the way a real request does:
 
 ```go
-err := gen.StreamRecords(ctx, 25, 0, func(ctx context.Context, rec map[string]any) error {
-    slog.Default().Info(fmt.Sprint(rec["message"]), "email", rec["email"])
+gen := chatterbox.NewGenerator(schema,
+    chatterbox.WithSeed(42),
+    chatterbox.WithCorrelation(chatterbox.CorrelationConfig{
+        MinLines:      3,
+        MaxLines:      8,
+        TimestampStep: 2 * time.Millisecond,
+        SpanIDField:   "span_id", // optional
+    }),
+)
+```
+
+---
+
+## Bursty / phased traffic
+
+Model normal load, a spike, then recovery:
+
+```go
+import "github.com/Haydn202/Chatterbox/schedule"
+
+sched, _ := schedule.PresetIncidentSpike(10, 150, time.Minute, 30*time.Second)
+stream, _ := chatterbox.NewStreamWithSchedule(gen, sched)
+_ = stream.Run(ctx, os.Stdout)
+
+// Or deliver raw records to your logger:
+_ = gen.StreamRecordsWithSchedule(ctx, sched, 0, myHandler)
+```
+
+---
+
+## Log through your own logger
+
+```go
+_ = gen.StreamRecords(ctx, 25, 0, func(ctx context.Context, rec map[string]any) error {
+    slog.Default().Info(fmt.Sprint(rec["message"]),
+        "trace_id", rec["trace_id"],
+        "email", rec["email"],
+    )
     return nil
 })
 ```
 
-See [`examples/stream_records_slog`](examples/stream_records_slog/main.go).
-
-### slog adapter
+Or use an adapter:
 
 ```go
 h := slog.NewJSONHandler(os.Stdout, nil)
@@ -103,162 +186,72 @@ em := slogadapter.New(h, emit.DefaultFieldMap())
 _ = adapter.Stream(ctx, gen, 25, 0, em)
 ```
 
-See [`examples/stream_slog`](examples/stream_slog/main.go).
+---
+
+## Multiline stack traces
+
+Physical multiline output for Filebeat-style rules:
 
 ```go
-import "github.com/Haydn202/Chatterbox/emit"
-
-// Logfmt
-opt, err := chatterbox.WithOutputFormat(emit.FormatLogfmt, emit.Options{})
-gen := chatterbox.NewGenerator(schema, opt, chatterbox.WithSeed(42))
-
-// Plain text
 gen := chatterbox.NewGenerator(schema,
-    chatterbox.WithFormatter(emit.PlainText(emit.PlainTextConfig{})),
+    chatterbox.WithFormatter(emit.TextMultilineFormatter(emit.TextMultilineConfig{
+        HeaderFields: []string{"timestamp", "level", "message"},
+        BodyFields:   []string{"stacktrace"},
+    })),
 )
+// schema field: chatterbox.MakeField("stacktrace", fuzz.StackTrace())
+```
 
-// Syslog
+JSONL mode embeds stacks as a single field with escaped `\n` characters.
+
+---
+
+## Output format selection
+
+```go
+opt, _ := chatterbox.WithOutputFormat(emit.FormatZapJSON, emit.Options{})
+gen := chatterbox.NewGenerator(schema, opt, chatterbox.WithSeed(42))
+```
+
+```go
 gen := chatterbox.NewGenerator(schema,
     chatterbox.WithFormatter(emit.Syslog(emit.SyslogConfig{
         Hostname: "api-1",
         AppName:  "checkout",
     })),
 )
-
-// CEF
-gen := chatterbox.NewGenerator(schema,
-    chatterbox.WithFormatter(emit.CEF(emit.CEFConfig{Vendor: "Acme", Product: "API"})),
-)
-
-// Multiline (stack traces on following lines)
-gen := chatterbox.NewGenerator(schema,
-    chatterbox.WithFormatter(emit.MustFormatter(emit.FormatMultiline, emit.Options{
-        Multiline: &emit.TextMultilineConfig{
-            HeaderFields: []string{"timestamp", "level", "message"},
-            BodyFields:   []string{"stacktrace"},
-        },
-    })),
-)
 ```
 
-## Correlation and burst traffic
+---
 
-**Trace correlation** — lines that belong together share IDs:
+## API reference
 
-```go
-gen := chatterbox.NewGenerator(schema,
-    chatterbox.WithCorrelation(chatterbox.CorrelationConfig{MinLines: 3, MaxLines: 8}),
-)
-```
+| Type | Role |
+|------|------|
+| `Schema` / `MakeField` | Ordered fields and fuzzers |
+| `Generator` | `Next`, `WriteN`, `GenerateN`, `StreamRecords`, … |
+| `WithSeed` | Reproducible PRNG |
+| `WithCorrelation` | Shared trace/request IDs |
+| `WithFormatter` / `WithOutputFormat` | Output encoding |
+| `Stream` | Rate-limited formatted writes |
+| `NewStreamWithSchedule` | Phased formatted writes |
+| `RecordHandler` | Per-record callback |
+| `schedule.Schedule` | `FlatRate`, `NewPhases`, `PresetIncidentSpike` |
+| `fuzz.Fuzzer` | Field value generation |
+| `emit.Formatter` | Record → bytes |
+| `adapter.Emitter` | Record → slog / zap / zerolog |
 
-**Phased rates** — model normal traffic, spikes, then recovery:
+---
 
-```go
-sched, _ := schedule.PresetIncidentSpike(10, 150, time.Minute, 30*time.Second)
-stream, _ := chatterbox.NewStreamWithSchedule(gen, sched)
-_ = stream.Run(ctx, os.Stdout)
-```
+## Fuzzer options
 
-See [docs/GUIDE.md](docs/GUIDE.md#correlation) and [examples/incident_burst](examples/incident_burst/main.go).
+**Email:** `WithTypoRate(0.05)`, `WithEdgeCases(true)`
 
-## Rate-limited streaming (live servers)
+**Stack trace:** `WithStackStyle("go"|"java"|"python")`, `WithFrames(min, max)`, `WithPanicMessages([]string)`
 
-Use `Stream` to emit logs at a fixed rate. Omit duration (or pass zero) to run until the context is cancelled—useful against live aggregators. Pass `context` cancellation via `signal.NotifyContext` for Ctrl+C.
+**Timestamp:** `WithJitter(seconds)`, `WithBaseTime(time.Time)`
 
-```go
-package main
-
-import (
-	"context"
-	"os"
-	"os/signal"
-	"syscall"
-	"time"
-
-	"github.com/Haydn202/Chatterbox"
-	"github.com/Haydn202/Chatterbox/fuzz"
-)
-
-func main() {
-	schema := chatterbox.NewSchema(/* fields ... */)
-	gen := chatterbox.NewGenerator(schema, chatterbox.WithSeed(42))
-
-	// 25 logs/sec for 10 minutes, then stop.
-	stream, err := chatterbox.NewStream(gen, 25,
-		chatterbox.WithStreamDuration(10*time.Minute),
-	)
-	if err != nil {
-		panic(err)
-	}
-
-	// Or omit WithStreamDuration to run until interrupted:
-	// stream, _ := chatterbox.NewStream(gen, 25)
-
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-
-	_ = stream.Run(ctx, os.Stdout)
-}
-```
-
-| Setting | Behavior |
-|---------|----------|
-| `Rate` | Logs per second (required, > 0) |
-| `WithStreamDuration(0)` | Run until `ctx` is cancelled (default) |
-| `WithStreamDuration(d)` | Stop after `d` elapses |
-
-## Multiline / stack traces
-
-For testing filebeat-style **multiline** rules, use `fuzz.StackTrace` with `emit.TextMultilineFormatter`. One log event spans multiple physical lines: a header line, then the stack body.
-
-```go
-schema := chatterbox.NewSchema(
-    chatterbox.MakeField("timestamp", fuzz.TimestampRFC3339(fuzz.WithJitter(30))),
-    chatterbox.MakeField("level", fuzz.LevelWeighted(map[string]float64{
-        "error": 1.0,
-    })),
-    chatterbox.MakeField("message", fuzz.StringFrom(10, 80)),
-    chatterbox.MakeField("stacktrace", fuzz.StackTrace()),
-)
-
-gen := chatterbox.NewGenerator(schema,
-    chatterbox.WithSeed(42),
-    chatterbox.WithFormatter(emit.TextMultilineFormatter(emit.TextMultilineConfig{
-        HeaderFields: []string{"timestamp", "level", "message"},
-        BodyFields:   []string{"stacktrace"},
-    })),
-)
-_ = gen.WriteN(os.Stdout, 100)
-```
-
-JSONL mode (default) still works: stack traces are a single JSON string field with escaped `\n` characters.
-
-## Built-in fuzzers
-
-| Fuzzer | Description |
-|--------|-------------|
-| `fuzz.Email(opts...)` | Varied local parts, domains, typos; optional edge cases |
-| `fuzz.TimestampRFC3339(opts...)` | RFC3339 time; `WithJitter`, `WithBaseTime` |
-| `fuzz.LevelWeighted(map)` | Weighted log levels |
-| `fuzz.StringFrom(min, max)` | Random alphanumeric message |
-| `fuzz.UUID()` | UUID v4-style string |
-| `fuzz.IPv4(opts...)` | IPv4; optional private ranges |
-| `fuzz.URL()` | HTTP/HTTPS URLs |
-| `fuzz.Choice(...)` | Uniform choice |
-| `fuzz.Weighted(map)` | Weighted string choice |
-| `fuzz.Optional(p, inner)` | Sometimes nil |
-| `fuzz.StackTrace(opts...)` | Multiline stack trace (`go`, `java`, `python` styles) |
-
-### Stack trace options
-
-- `fuzz.WithStackStyle("go")` — `go`, `java`, or `python`
-- `fuzz.WithFrames(min, max)` — frame count (default 3–12)
-- `fuzz.WithPanicMessages([]string)` — custom first-line messages
-
-### Email options
-
-- `fuzz.WithTypoRate(0.05)` — adjacent swaps, missing dots, etc.
-- `fuzz.WithEdgeCases(true)` — invalid-but-plausible addresses (`@@`, trailing `.`, …)
+---
 
 ## Testing
 
@@ -266,24 +259,24 @@ JSONL mode (default) still works: stack traces are a single JSON string field wi
 go test ./...
 ```
 
-Golden output: `testdata/golden.jsonl`, `testdata/golden-multiline.txt`. Regenerate with:
+Golden files: `testdata/golden.jsonl`, `testdata/golden-multiline.txt`
 
-```bash
-# PowerShell
+```powershell
 $env:UPDATE_GOLDEN="1"; go test ./...
 ```
 
-## Adding a fuzzer
-
-1. Implement `fuzz.Fuzzer` (`Generate(*rand.Rand) any`) in `fuzz/`.
-2. Add table tests in `fuzz/*_test.go` with a fixed `rand.NewPCG` seed.
-3. Document options and defaults in godoc.
+---
 
 ## Roadmap
 
-- **Config-driven schemas** (YAML/JSON) parsed into the same `Schema` type via a fuzzer registry.
-- Additional emitters (logfmt, syslog, ECS-shaped JSON).
+- Config-driven schemas (YAML/JSON) with fuzzer registry
+- Preset trace bundles (ingress → error + stack templates)
+- Poisson / random burst schedules
+- ECS / OpenTelemetry JSON presets
+- logrus adapter
+
+---
 
 ## License
 
-See repository license (add as needed).
+See repository license.
