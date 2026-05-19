@@ -22,7 +22,8 @@ This document explains how the library is structured, what each component does, 
 12. [Logger integration](#logger-integration)
 13. [Reproducibility and testing](#reproducibility-and-testing)
 14. [Examples](#examples)
-15. [Roadmap (not yet implemented)](#roadmap-not-yet-implemented)
+15. [CLI](#cli)
+16. [Roadmap (not yet implemented)](#roadmap-not-yet-implemented)
 
 ---
 
@@ -522,11 +523,50 @@ go run ./examples/stream_records_slog
 
 ---
 
+## CLI
+
+Install:
+
+```bash
+go install github.com/Haydn202/Chatterbox/cmd/chatterbox@latest
+```
+
+The CLI wraps the same generator, formatters, correlation, and schedules as the library. Schema comes from [`preset`](../preset/preset.go) packages—not YAML yet.
+
+### Commands
+
+- `chatterbox run [flags]` — generate logs
+- `chatterbox version` — print build version
+
+### Presets
+
+| Preset | Description |
+|--------|-------------|
+| `default` | General-purpose JSON logs with email and client_ip |
+| `api` | Adds `url` field |
+| `minimal` | timestamp, level, message only |
+| `multiline-error` | Error-heavy levels, stacktrace enabled, correlation on by default |
+
+Override fields: `--email`, `--no-email`, `--stacktrace`, `--correlate`, `--no-correlate`.
+
+### Modes
+
+- **Batch:** `-n 1000` writes exactly N lines and exits.
+- **Stream:** omit `-n`; use `-r` (default 10/sec). `-d 5m` caps duration; omit `-d` to run until SIGINT.
+- **Burst:** `--burst` uses `PresetIncidentSpike` with `--rate`, `--burst-rate`, `--burst-base-duration`, `--burst-peak-duration`.
+
+### Library vs CLI
+
+Use the **library** when you need custom schemas, logger adapters, or `RecordHandler` integration. Use the **CLI** for quick pipe-to-agent tests and ops scripts.
+
+---
+
 ## Roadmap (not yet implemented)
 
 - Preset trace bundles (ingress → error+stack templates)
 - Poisson / random burst schedules
-- **Config-driven schemas** (YAML/JSON) with a fuzzer registry
+- **Config-driven schemas** (YAML/JSON) for CLI and library
+- CLI HTTP sink to remote ingest endpoints
 - **logrus** adapter
 - Additional emitters (ECS-shaped JSON, full syslog variants)
 - Optional `chatterbox/record` helpers (`ParseLevel`, `AttrsExcept`) for less boilerplate in callbacks

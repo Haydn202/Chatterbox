@@ -10,6 +10,7 @@
 
 <p align="center">
   <a href="docs/GUIDE.md">Full guide</a> ·
+  <a href="#cli">CLI</a> ·
   <a href="examples/">Examples</a>
 </p>
 
@@ -73,17 +74,59 @@
 - Pass records to your existing logging stack (hooks, sampling, formatters apply)
 - Load-test Filebeat multiline rules, trace queries in Loki/Tempo, PII on fuzzy emails
 
+### CLI
+
+- **`chatterbox run`** — generate logs from the terminal without writing Go
+- Named **presets** (`default`, `api`, `minimal`, `multiline-error`) and field toggles (`--email`, `--stacktrace`, `--correlate`)
+- Batch (`-n`) or stream (`-r`, `-d`) with optional **incident burst** (`--burst`)
+
 ---
 
 ## Install
+
+**Library:**
 
 ```bash
 go get github.com/Haydn202/Chatterbox
 ```
 
+**CLI:**
+
+```bash
+go install github.com/Haydn202/Chatterbox/cmd/chatterbox@latest
+```
+
 Requires Go 1.22+ (`math/rand/v2`).
 
 **Deep dive:** [docs/GUIDE.md](docs/GUIDE.md)
+
+---
+
+## CLI
+
+```bash
+# 1000 JSON lines to stdout
+chatterbox run -n 1000 --format json --seed 42
+
+# Stream 25/sec for 5 minutes
+chatterbox run -r 25 --duration 5m --preset api
+
+# Multiline stack traces + correlation
+chatterbox run --preset multiline-error --format multiline --stacktrace
+
+# Incident spike: 10/sec, then 150/sec for 30s, then 10/sec until Ctrl+C
+chatterbox run --burst --rate 10 --burst-rate 150 -o ./load.log
+
+chatterbox run -h    # all flags
+chatterbox version
+```
+
+| Preset | Fields (typical) |
+|--------|------------------|
+| `default` | timestamp, level, message, email, client_ip |
+| `api` | default + url |
+| `minimal` | timestamp, level, message |
+| `multiline-error` | error-heavy levels, stacktrace, correlation on by default |
 
 ---
 
@@ -269,11 +312,12 @@ $env:UPDATE_GOLDEN="1"; go test ./...
 
 ## Roadmap
 
-- Config-driven schemas (YAML/JSON) with fuzzer registry
+- Config-driven schemas (YAML/JSON) with fuzzer registry for CLI and library
 - Preset trace bundles (ingress → error + stack templates)
 - Poisson / random burst schedules
 - ECS / OpenTelemetry JSON presets
 - logrus adapter
+- HTTP sink (push to Loki/Elasticsearch)
 
 ---
 
