@@ -76,7 +76,8 @@
 
 ### CLI
 
-- **`chatterbox run`** — generate logs from the terminal without writing Go
+- **`chatterbox run`** — generate logs from presets or YAML schemas
+- **`chatterbox scenario run`** — multi-service failure simulation from YAML
 - Named **presets** (`default`, `api`, `minimal`, `multiline-error`) and field toggles (`--email`, `--stacktrace`, `--correlate`)
 - Batch (`-n`) or stream (`-r`, `-d`) with optional **incident burst** (`--burst`)
 
@@ -116,6 +117,11 @@ chatterbox run --preset multiline-error --format multiline --stacktrace
 
 # Incident spike: 10/sec, then 150/sec for 30s, then 10/sec until Ctrl+C
 chatterbox run --burst --rate 10 --burst-rate 150 -o ./load.log
+
+chatterbox run --schema schemas/api-service.yaml -n 100
+
+chatterbox scenario run -f scenarios/cascading-failure.yaml --duration 5m
+chatterbox scenario run -f scenarios/cascading-failure.yaml --output-mode both -o out/combined.jsonl --output-dir out/
 
 chatterbox run -h    # all flags
 chatterbox version
@@ -310,9 +316,16 @@ $env:UPDATE_GOLDEN="1"; go test ./...
 
 ---
 
+## YAML schemas and scenarios
+
+**Schema YAML** (`config` package) defines fields and fuzzer types. Use with the CLI via `--schema` or from Go with `config.LoadSchemaFile`.
+
+**Scenario YAML** (`scenario` package) orchestrates multiple services through a timeline of failure events (`redis_latency_spike`, `retry_storm`, `pod_restarts`, `db_connection_exhaustion`). See [`scenarios/cascading-failure.yaml`](scenarios/cascading-failure.yaml).
+
+---
+
 ## Roadmap
 
-- Config-driven schemas (YAML/JSON) with fuzzer registry for CLI and library
 - Preset trace bundles (ingress → error + stack templates)
 - Poisson / random burst schedules
 - ECS / OpenTelemetry JSON presets

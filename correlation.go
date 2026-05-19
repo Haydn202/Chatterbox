@@ -56,19 +56,26 @@ func normalizeCorrelation(cfg CorrelationConfig) CorrelationConfig {
 }
 
 func (g *Generator) applyCorrelation(record map[string]any) {
+	if g.sharedCorrelation != nil {
+		g.sharedCorrelation.ApplyCorrelation(record)
+		return
+	}
 	if g.correlation == nil {
 		return
 	}
-	c := g.correlation
+	applyCorrelationState(g.correlation, record, g.rng)
+}
+
+func applyCorrelationState(c *correlationState, record map[string]any, rng *rand.Rand) {
 	if c.linesRemaining == 0 {
-		c.traceID = fuzz.UUID().Generate(g.rng).(string)
-		c.requestID = fmt.Sprintf("req-%s", randomHex12(g.rng))
+		c.traceID = fuzz.UUID().Generate(rng).(string)
+		c.requestID = fmt.Sprintf("req-%s", randomHex12(rng))
 		if c.cfg.SpanIDField != "" {
-			c.spanID = fuzz.UUID().Generate(g.rng).(string)
+			c.spanID = fuzz.UUID().Generate(rng).(string)
 		}
 		n := c.cfg.MinLines
 		if c.cfg.MaxLines > c.cfg.MinLines {
-			n += g.rng.IntN(c.cfg.MaxLines - c.cfg.MinLines + 1)
+			n += rng.IntN(c.cfg.MaxLines - c.cfg.MinLines + 1)
 		}
 		c.linesRemaining = n
 		c.traceStart = time.Now().UTC()

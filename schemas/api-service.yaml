@@ -1,0 +1,22 @@
+schema:
+  name: api-service
+
+fields:
+  - name: timestamp
+    type: timestamp_rfc3339
+    jitter_seconds: 30
+
+  - name: level
+    type: level_weighted
+    weights: { info: 0.7, warn: 0.2, error: 0.1 }
+
+  - name: message
+    type: string
+    min_len: 10
+    max_len: 120
+
+  - name: url
+    type: url
+
+  - name: email
+    type: email

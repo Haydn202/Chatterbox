@@ -1,0 +1,50 @@
+scenario:
+  name: cascading-failure
+  seed: 42
+  duration: 15m
+  format: json
+  rate: 25
+  default_phase_duration: 3m
+
+services:
+  api:
+    preset: api
+    rate_weight: 0.4
+    labels:
+      component: edge
+  auth:
+    preset: default
+    rate_weight: 0.2
+  redis:
+    preset: minimal
+    rate_weight: 0.2
+  postgres:
+    preset: default
+    rate_weight: 0.2
+
+timeline:
+  - event: baseline
+    duration: 2m
+
+  - event: redis_latency_spike
+    duration: 3m
+    services: [redis, api]
+
+  - event: retry_storm
+    duration: 3m
+    services: [api, auth]
+
+  - event: pod_restarts
+    duration: 2m
+    services: [api, auth, redis]
+
+  - event: db_connection_exhaustion
+    duration: 3m
+    services: [postgres, api]
+
+# Shorthand (events-only) also works — omit timeline and use:
+# events:
+#   - redis_latency_spike
+#   - retry_storm
+#   - pod_restarts
+#   - db_connection_exhaustion

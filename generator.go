@@ -9,10 +9,11 @@ import (
 
 // Generator produces log lines from a schema.
 type Generator struct {
-	schema      *Schema
-	rng         *rand.Rand
-	formatter   emit.Formatter
-	correlation *correlationState
+	schema            *Schema
+	rng               *rand.Rand
+	formatter         emit.Formatter
+	correlation       *correlationState
+	sharedCorrelation *SharedCorrelation
 }
 
 // GeneratorOption configures a Generator.
@@ -45,19 +46,35 @@ func NewGenerator(schema *Schema, opts ...GeneratorOption) *Generator {
 	return g
 }
 
-// Next generates one log record as a field map.
-func (g *Generator) Next() map[string]any {
+// GenerateFields builds a record from fuzzers without correlation IDs.
+func (g *Generator) GenerateFields() map[string]any {
 	record := make(map[string]any, len(g.schema.fields))
 	for _, f := range g.schema.fields {
 		record[f.Name] = f.Fuzzer.Generate(g.rng)
 	}
+	return record
+}
+
+// Next generates one log record as a field map.
+func (g *Generator) Next() map[string]any {
+	record := g.GenerateFields()
 	g.applyCorrelation(record)
 	return record
 }
 
 // NextFormatted returns one encoded event using the configured formatter.
 func (g *Generator) NextFormatted() ([]byte, error) {
-	return g.formatter.Format(g.Next())
+	return g.FormatRecord(g.Next())
+}
+
+// FormatRecord encodes an already-built record.
+func (g *Generator) FormatRecord(record map[string]any) ([]byte, error) {
+	return g.formatter.Format(record)
+}
+
+// Rand returns the generator PRNG (for field overrides in scenario mode).
+func (g *Generator) Rand() *rand.Rand {
+	return g.rng
 }
 
 // NextJSON returns one JSONL-encoded line (with trailing newline).

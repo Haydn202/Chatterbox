@@ -14,9 +14,24 @@ func main() {
 
 func run(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: chatterbox <run|version> [flags]\n\nRun chatterbox run -h for help")
+		return fmt.Errorf("usage: chatterbox <run|scenario|version> [flags]\n\nRun chatterbox run -h for help")
 	}
 	switch args[0] {
+	case "scenario":
+		if len(args) < 2 {
+			return fmt.Errorf("usage: chatterbox scenario run -f <file.yaml>")
+		}
+		if args[1] != "run" {
+			return fmt.Errorf("unknown scenario subcommand %q (use: scenario run)", args[1])
+		}
+		cfg, err := parseScenarioRunFlags(args[2:])
+		if err != nil {
+			if err == errHelp {
+				return nil
+			}
+			return err
+		}
+		return executeScenarioRun(cfg)
 	case "run":
 		cfg, err := parseRunFlags(args[1:])
 		if err != nil {
@@ -40,5 +55,5 @@ var errHelp = fmt.Errorf("help")
 
 func printRootUsage() {
 	fmt.Fprintf(os.Stderr, "Chatterbox — synthetic fuzzy logs for pipeline testing\n\n")
-	fmt.Fprintf(os.Stderr, "Usage:\n  chatterbox run [flags]   generate logs\n  chatterbox version       print version\n")
+	fmt.Fprintf(os.Stderr, "Usage:\n  chatterbox run [flags]              generate logs\n  chatterbox scenario run -f FILE     run failure scenario\n  chatterbox version                  print version\n")
 }

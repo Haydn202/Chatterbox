@@ -23,7 +23,9 @@ This document explains how the library is structured, what each component does, 
 13. [Reproducibility and testing](#reproducibility-and-testing)
 14. [Examples](#examples)
 15. [CLI](#cli)
-16. [Roadmap (not yet implemented)](#roadmap-not-yet-implemented)
+16. [YAML schemas (`config`)](#yaml-schemas-config)
+17. [Scenario simulation (`scenario`)](#scenario-simulation-scenario)
+18. [Roadmap (not yet implemented)](#roadmap-not-yet-implemented)
 
 ---
 
@@ -531,11 +533,12 @@ Install:
 go install github.com/Haydn202/Chatterbox/cmd/chatterbox@latest
 ```
 
-The CLI wraps the same generator, formatters, correlation, and schedules as the library. Schema comes from [`preset`](../preset/preset.go) packages—not YAML yet.
+The CLI wraps the same generator, formatters, correlation, and schedules as the library. Schemas come from [`preset`](../preset/preset.go) or YAML via [`config`](../config/load.go).
 
 ### Commands
 
-- `chatterbox run [flags]` — generate logs
+- `chatterbox run [flags]` — generate logs (preset or `--schema`)
+- `chatterbox scenario run -f FILE` — multi-service failure simulation
 - `chatterbox version` — print build version
 
 ### Presets
@@ -561,11 +564,93 @@ Use the **library** when you need custom schemas, logger adapters, or `RecordHan
 
 ---
 
+## YAML schemas (`config`)
+
+Load a declarative schema from YAML:
+
+```yaml
+fields:
+  - name: timestamp
+    type: timestamp_rfc3339
+    jitter_seconds: 30
+  - name: level
+    type: level_weighted
+    weights: { info: 0.7, warn: 0.2, error: 0.1 }
+  - name: message
+    type: string
+    min_len: 10
+    max_len: 120
+```
+
+```go
+schema, err := config.LoadSchemaFile("schemas/api-service.yaml")
+gen := chatterbox.NewGenerator(schema, chatterbox.WithSeed(1))
+```
+
+**Fuzzer types:** `timestamp_rfc3339`, `level_weighted`, `weighted`, `string`, `email`, `uuid`, `ipv4`, `url`, `choice`, `constant`, `optional`, `stacktrace`.
+
+CLI: `chatterbox run --schema schemas/api-service.yaml -n 1000`
+
+Example file: [`schemas/api-service.yaml`](../schemas/api-service.yaml)
+
+---
+
+## Scenario simulation (`scenario`)
+
+Scenarios model **multi-service cascading failures** with a timeline of named events. Each service uses a preset or schema file; every log line includes a `service` field.
+
+```yaml
+scenario:
+  name: cascading-failure
+  seed: 42
+  rate: 25
+  duration: 15m
+
+services:
+  api: { preset: api, rate_weight: 0.4 }
+  auth: { preset: default }
+  redis: { preset: minimal }
+  postgres: { preset: default }
+
+timeline:
+  - event: baseline
+    duration: 2m
+  - event: redis_latency_spike
+    duration: 3m
+    services: [redis, api]
+  - event: retry_storm
+    services: [api, auth]
+```
+
+**Shorthand:** omit `timeline` and list `events:` only; phases use `default_phase_duration` and an implicit `baseline` first.
+
+**Built-in events:** `baseline`, `redis_latency_spike`, `retry_storm`, `pod_restarts`, `db_connection_exhaustion`. Events patch level weights, messages, rate multipliers, and enable **shared cross-service correlation** during `retry_storm`.
+
+```go
+plan, _ := scenario.ParseFile("scenarios/cascading-failure.yaml")
+runner, _ := scenario.NewRunner(plan, scenario.RunnerOptions{})
+_ = runner.Run(ctx, scenario.WritersConfig{
+    Mode:     scenario.OutputInterleaved,
+    Combined: os.Stdout,
+})
+```
+
+**Output modes:** `interleaved` (single stream with `service` field), `split` (one file per service under `--output-dir`), `both`.
+
+CLI:
+
+```bash
+chatterbox scenario run -f scenarios/cascading-failure.yaml
+chatterbox scenario run -f scenarios/cascading-failure.yaml --output-mode both -o out/combined.jsonl --output-dir out/
+```
+
+---
+
 ## Roadmap (not yet implemented)
 
 - Preset trace bundles (ingress → error+stack templates)
 - Poisson / random burst schedules
-- **Config-driven schemas** (YAML/JSON) for CLI and library
+- Inline user-defined event YAML (patches in Go registry today)
 - CLI HTTP sink to remote ingest endpoints
 - **logrus** adapter
 - Additional emitters (ECS-shaped JSON, full syslog variants)

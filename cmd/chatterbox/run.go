@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/Haydn202/Chatterbox"
+	"github.com/Haydn202/Chatterbox/config"
 	"github.com/Haydn202/Chatterbox/emit"
 	"github.com/Haydn202/Chatterbox/preset"
 	"github.com/Haydn202/Chatterbox/schedule"
@@ -25,6 +26,7 @@ type runConfig struct {
 	Format            string
 	Seed              uint64
 	PresetName        string
+	SchemaPath        string
 	Email             *bool
 	Stacktrace        *bool
 	Correlate         *bool
@@ -57,6 +59,7 @@ func parseRunFlags(args []string) (runConfig, error) {
 	fs.StringVar(&cfg.Format, "format", cfg.Format, "output format: json, logfmt, plain, syslog, cef, multiline, slog_json, zap_json, zerolog_json")
 	fs.Uint64Var(&cfg.Seed, "seed", cfg.Seed, "PRNG seed")
 	fs.StringVar(&cfg.PresetName, "preset", cfg.PresetName, "schema preset: default, api, minimal, multiline-error")
+	fs.StringVar(&cfg.SchemaPath, "schema", "", "path to YAML schema file (overrides --preset)")
 
 	var email, noEmail, stacktrace, correlate, noCorrelate bool
 	fs.BoolVar(&email, "email", false, "include email field")
@@ -100,23 +103,36 @@ func parseRunFlags(args []string) (runConfig, error) {
 }
 
 func executeRun(cfg runConfig) error {
-	presetName, err := preset.ParseName(cfg.PresetName)
-	if err != nil {
-		return err
-	}
-	opt := preset.Options{
-		Email:      cfg.Email,
-		Stacktrace: cfg.Stacktrace,
-		Correlate:  cfg.Correlate,
-	}
-	if cfg.NoCorrelate {
-		f := false
-		opt.Correlate = &f
-	}
+	var schema *chatterbox.Schema
+	var presetName preset.Name
+	var opt preset.Options
 
-	schema, err := preset.Build(presetName, opt)
-	if err != nil {
-		return err
+	if cfg.SchemaPath != "" {
+		var err error
+		schema, err = config.LoadSchemaFile(cfg.SchemaPath)
+		if err != nil {
+			return err
+		}
+		presetName = preset.Default
+	} else {
+		var err error
+		presetName, err = preset.ParseName(cfg.PresetName)
+		if err != nil {
+			return err
+		}
+		opt = preset.Options{
+			Email:      cfg.Email,
+			Stacktrace: cfg.Stacktrace,
+			Correlate:  cfg.Correlate,
+		}
+		if cfg.NoCorrelate {
+			f := false
+			opt.Correlate = &f
+		}
+		schema, err = preset.Build(presetName, opt)
+		if err != nil {
+			return err
+		}
 	}
 
 	emitOpts, err := formatterOptions(cfg.Format, presetName, opt)
@@ -129,7 +145,11 @@ func executeRun(cfg runConfig) error {
 	}
 
 	genOpts := []chatterbox.GeneratorOption{chatterbox.WithSeed(cfg.Seed), formatOpt}
-	if preset.CorrelateEnabled(presetName, opt) {
+	useCorrelate := cfg.Correlate != nil && *cfg.Correlate
+	if cfg.SchemaPath == "" {
+		useCorrelate = preset.CorrelateEnabled(presetName, opt)
+	}
+	if useCorrelate && !cfg.NoCorrelate {
 		genOpts = append(genOpts, chatterbox.WithCorrelation(chatterbox.CorrelationConfig{
 			MinLines:      3,
 			MaxLines:      8,
@@ -230,4 +250,5 @@ func printRunUsage(fs *flag.FlagSet) {
 	fmt.Fprintf(os.Stderr, "  chatterbox run -r 25 --duration 5m --preset api\n")
 	fmt.Fprintf(os.Stderr, "  chatterbox run --preset multiline-error --format multiline --stacktrace\n")
 	fmt.Fprintf(os.Stderr, "  chatterbox run --burst --rate 10 --burst-rate 150\n")
+	fmt.Fprintf(os.Stderr, "  chatterbox run --schema schemas/api-service.yaml -n 500\n")
 }

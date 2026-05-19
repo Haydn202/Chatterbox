@@ -1,0 +1,16 @@
+schema:
+  name: minimal-test
+
+fields:
+  - name: timestamp
+    type: timestamp_rfc3339
+    jitter_seconds: 0
+
+  - name: level
+    type: level_weighted
+    weights: { info: 1.0 }
+
+  - name: message
+    type: string
+    min_len: 5
+    max_len: 10
