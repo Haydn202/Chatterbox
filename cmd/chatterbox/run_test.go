@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -84,6 +85,23 @@ func TestParseRunFlags_email(t *testing.T) {
 
 func TestRunVersion(t *testing.T) {
 	if err := runVersion(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestOpenOutput_createsParentDir(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "nested", "out", "logs.jsonl")
+	w, closeFn, err := openOutput(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if closeFn != nil {
+		defer closeFn()
+	}
+	if _, err := w.Write([]byte("x")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(path); err != nil {
 		t.Fatal(err)
 	}
 }

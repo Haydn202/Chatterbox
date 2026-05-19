@@ -20,6 +20,7 @@ type Plan struct {
 	Format               emit.Format
 	Rate                 float64
 	DefaultPhaseDuration time.Duration
+	Correlate            bool // trace_id / request_id on every line (default true)
 	Services             map[string]ServiceConfig
 	Phases               []Phase
 }
@@ -48,6 +49,7 @@ type scenarioDoc struct {
 		Format               string  `yaml:"format"`
 		Rate                 float64 `yaml:"rate"`
 		DefaultPhaseDuration string  `yaml:"default_phase_duration"`
+		Correlate            *bool   `yaml:"correlate"`
 	} `yaml:"scenario"`
 	Services map[string]serviceDoc `yaml:"services"`
 	Timeline []phaseDoc            `yaml:"timeline"`
@@ -93,6 +95,11 @@ func Parse(r io.Reader, baseDir string) (*Plan, error) {
 	}
 	if plan.Rate <= 0 {
 		plan.Rate = 25
+	}
+	if doc.Scenario.Correlate == nil {
+		plan.Correlate = true
+	} else {
+		plan.Correlate = *doc.Scenario.Correlate
 	}
 	if doc.Scenario.Duration != "" {
 		d, err := time.ParseDuration(doc.Scenario.Duration)

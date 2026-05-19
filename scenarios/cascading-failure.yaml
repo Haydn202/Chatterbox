@@ -5,6 +5,7 @@ scenario:
   format: json
   rate: 25
   default_phase_duration: 3m
+  correlate: true   # trace_id + request_id on every line (shared across services)
 
 services:
   api:

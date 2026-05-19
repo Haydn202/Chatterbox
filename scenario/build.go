@@ -20,18 +20,20 @@ type serviceRuntime struct {
 
 // RunnerOptions configures scenario execution.
 type RunnerOptions struct {
-	Seed     uint64
-	Duration time.Duration
-	Format   emit.Format
-	Rate     float64
+	Seed      uint64
+	Duration  time.Duration
+	Format    emit.Format
+	Rate      float64
+	Correlate *bool // nil = use plan.Correlate
 }
 
 // Runner executes a scenario plan.
 type Runner struct {
-	plan   *Plan
-	opts   RunnerOptions
-	states map[string]*serviceRuntime
-	shared *chatterbox.SharedCorrelation
+	plan      *Plan
+	opts      RunnerOptions
+	states    map[string]*serviceRuntime
+	shared    *chatterbox.SharedCorrelation
+	correlate bool
 }
 
 // NewRunner builds generators for each service in the plan.
@@ -86,11 +88,17 @@ func NewRunner(plan *Plan, opts RunnerOptions) (*Runner, error) {
 		}
 	}
 
+	correlate := plan.Correlate
+	if ro.Correlate != nil {
+		correlate = *ro.Correlate
+	}
+
 	return &Runner{
-		plan:   plan,
-		opts:   ro,
-		states: states,
-		shared: shared,
+		plan:      plan,
+		opts:      ro,
+		states:    states,
+		shared:    shared,
+		correlate: correlate,
 	}, nil
 }
 
@@ -109,7 +117,7 @@ func (r *Runner) emitFrom(st *serviceRuntime) ([]byte, error) {
 	rec := st.gen.GenerateFields()
 	rng := st.gen.Rand()
 	applyPatchToRecord(rec, st.patch, rng)
-	if st.patch.useSharedCorrelation {
+	if r.correlate || st.patch.useSharedCorrelation {
 		r.shared.ApplyCorrelation(rec)
 	}
 	rec["service"] = st.name

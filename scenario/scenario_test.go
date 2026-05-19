@@ -84,3 +84,55 @@ func TestRunner_allServices(t *testing.T) {
 		}
 	}
 }
+
+func TestRunner_correlationIDs(t *testing.T) {
+	const doc = `
+scenario:
+  name: corr-test
+  correlate: true
+  default_phase_duration: 1s
+services:
+  api: { preset: minimal }
+timeline:
+  - event: baseline
+    duration: 1s
+`
+	plan, err := scenario.Parse(strings.NewReader(doc), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan.Duration = 200 * time.Millisecond
+	runner, err := scenario.NewRunner(plan, scenario.RunnerOptions{Rate: 40})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := runner.Run(ctx, scenario.WritersConfig{
+		Mode:     scenario.OutputInterleaved,
+		Combined: &buf,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	foundTrace := false
+	for _, line := range strings.Split(strings.TrimSpace(buf.String()), "\n") {
+		if line == "" {
+			continue
+		}
+		var m map[string]any
+		if err := json.Unmarshal([]byte(line), &m); err != nil {
+			t.Fatal(err)
+		}
+		if tid, _ := m["trace_id"].(string); tid != "" {
+			foundTrace = true
+			if _, ok := m["request_id"].(string); !ok {
+				t.Fatal("missing request_id")
+			}
+			break
+		}
+	}
+	if !foundTrace {
+		t.Fatal("expected trace_id on correlated scenario output")
+	}
+}

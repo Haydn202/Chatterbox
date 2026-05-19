@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -231,6 +232,11 @@ func mergePresetBool(def, override *bool) bool {
 func openOutput(path string) (io.Writer, func(), error) {
 	if path == "" || path == "-" {
 		return os.Stdout, nil, nil
+	}
+	if dir := filepath.Dir(path); dir != "" && dir != "." {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			return nil, nil, fmt.Errorf("create output directory %s: %w", dir, err)
+		}
 	}
 	f, err := os.Create(path)
 	if err != nil {

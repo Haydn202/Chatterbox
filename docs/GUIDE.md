@@ -624,7 +624,9 @@ timeline:
 
 **Shorthand:** omit `timeline` and list `events:` only; phases use `default_phase_duration` and an implicit `baseline` first.
 
-**Built-in events:** `baseline`, `redis_latency_spike`, `retry_storm`, `pod_restarts`, `db_connection_exhaustion`. Events patch level weights, messages, rate multipliers, and enable **shared cross-service correlation** during `retry_storm`.
+**Correlation:** `correlate: true` (default) adds `trace_id` and `request_id` to every line. IDs are **shared across services** so a trace can span `api` → `redis` → `postgres` in one synthetic request. Disable with `correlate: false` or `chatterbox scenario run --no-correlate`.
+
+**Built-in events:** `baseline`, `redis_latency_spike`, `retry_storm`, `pod_restarts`, `db_connection_exhaustion`. Events patch level weights, messages, and rate multipliers.
 
 ```go
 plan, _ := scenario.ParseFile("scenarios/cascading-failure.yaml")

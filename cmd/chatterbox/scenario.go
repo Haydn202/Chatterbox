@@ -15,13 +15,15 @@ import (
 )
 
 type scenarioRunConfig struct {
-	File       string
-	Seed       uint64
-	Duration   time.Duration
-	Format     string
-	OutputMode string
-	Output     string
-	OutputDir  string
+	File        string
+	Seed        uint64
+	Duration    time.Duration
+	Format      string
+	OutputMode  string
+	Output      string
+	OutputDir   string
+	Correlate   *bool
+	NoCorrelate bool
 }
 
 func parseScenarioRunFlags(args []string) (scenarioRunConfig, error) {
@@ -39,6 +41,9 @@ func parseScenarioRunFlags(args []string) (scenarioRunConfig, error) {
 	fs.StringVar(&cfg.Output, "output", cfg.Output, "combined output path or - for stdout")
 	fs.StringVar(&cfg.Output, "o", cfg.Output, "combined output path or - for stdout")
 	fs.StringVar(&cfg.OutputDir, "output-dir", "", "directory for per-service files (split or both)")
+	var correlate bool
+	fs.BoolVar(&correlate, "correlate", false, "enable trace_id / request_id on every line")
+	fs.BoolVar(&cfg.NoCorrelate, "no-correlate", false, "disable correlation IDs")
 	fs.Usage = func() { printScenarioRunUsage(fs) }
 	if err := fs.Parse(args); err != nil {
 		if err == flag.ErrHelp {
@@ -48,6 +53,13 @@ func parseScenarioRunFlags(args []string) (scenarioRunConfig, error) {
 	}
 	if cfg.File == "" {
 		return cfg, fmt.Errorf("scenario run: -f/--file is required")
+	}
+	if correlate {
+		cfg.Correlate = boolPtr(true)
+	}
+	if cfg.NoCorrelate {
+		f := false
+		cfg.Correlate = &f
 	}
 	return cfg, nil
 }
@@ -67,6 +79,7 @@ func executeScenarioRun(cfg scenarioRunConfig) error {
 	if cfg.Format != "" {
 		opts.Format = emit.Format(cfg.Format)
 	}
+	opts.Correlate = cfg.Correlate
 
 	runner, err := scenario.NewRunner(plan, opts)
 	if err != nil {
