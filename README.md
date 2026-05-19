@@ -10,6 +10,8 @@ go get github.com/Haydn202/Chatterbox
 
 Requires Go 1.22+ (`math/rand/v2`).
 
+**Full documentation:** [docs/GUIDE.md](docs/GUIDE.md) — architecture, all fuzzers, formatters, emission modes, adapters, and testing.
+
 ## Quickstart
 
 ```go
@@ -43,12 +45,121 @@ func main() {
 | Type | Role |
 |------|------|
 | `Schema` / `MakeField` | Ordered log fields and fuzzers |
-| `Generator` | `Next()`, `NextFormatted()`, `NextJSON()`, `NextN()`, `WriteN()` |
-| `Stream` | `Run(ctx, w)` — emit at a rate for a duration or until cancelled |
+| `Generator` | `Next()`, `GenerateN()`, `StreamRecords()`, `NextFormatted()`, `WriteN()`, … |
+| `Stream` | `Run(ctx, w)` — formatted bytes at a rate or `schedule` |
+| `WithCorrelation` | Shared `trace_id` / `request_id` across N consecutive lines |
+| `schedule` | Phased rates (`NewPhases`, `PresetIncidentSpike`) |
+| `RecordHandler` | Callback to log records with your own logger |
 | `fuzz.Fuzzer` | Pluggable value generation |
-| `emit.Formatter` | Encode records (JSONL default, or multiline text) |
+| `emit.Formatter` | Encode records (pluggable) |
+| `emit.Format` | `json`, `logfmt`, `plain`, `syslog`, `cef`, `multiline`, `slog_json`, `zap_json`, … |
+| `adapter` | Optional helpers for slog, zap, zerolog |
 
 Use `chatterbox.WithSeed(uint64)` for reproducible sequences in tests.
+
+## Output formats
+
+Pass a formatter to `chatterbox.WithFormatter`, or use `emit.NewFormatter` / `chatterbox.WithOutputFormat`:
+
+| Format | Description | Example use |
+|--------|-------------|-------------|
+| `json` (default) | One JSON object per line | ELK, Loki, CloudWatch |
+| `logfmt` | `key=value` pairs | Grafana Loki (logfmt), structured grep |
+| `plain` | `timestamp LEVEL message key=value` | Human tailing, simple parsers |
+| `syslog` | RFC5424-style line | Syslog-ng, rsyslog, network collectors |
+| `cef` | ArcSight CEF | SIEM (QRadar, Sentinel CEF) |
+| `multiline` | Header line + body fields on following lines | Filebeat multiline rules |
+| `slog_json` | `slog.JSONHandler` field names (`time`, `level`, `msg`) | Loki/ELK when apps use slog JSON |
+| `slog_text` | `slog.TextHandler` key=value line | Text slog apps |
+| `zap_json` | Zap production JSON (`ts`, `caller`, `msg`) | Zap-based services |
+| `zerolog_json` | Zerolog JSON (`time`, `level`, `message`) | Zerolog services |
+
+## Go loggers and production-realistic output
+
+Go services commonly use **slog**, **zap**, **zerolog**, or **logrus**. Chatterbox supports three integration styles:
+
+| Style | API | Best for |
+|-------|-----|----------|
+| **Callback (recommended in-app)** | `GenerateN` / `StreamRecords` + `RecordHandler` | Your app logs with its existing logger; hooks and sampling apply |
+| **Format presets** | `emit.FormatSlogJSON`, `FormatZapJSON`, … + `Stream` | Pipe realistic lines to stdout/agents without importing a logger |
+| **Adapters** | `adapter/slog`, `adapter/zap`, `adapter/zerolog` | Less boilerplate; output goes through the real library |
+
+### Callback — any logger
+
+```go
+err := gen.StreamRecords(ctx, 25, 0, func(ctx context.Context, rec map[string]any) error {
+    slog.Default().Info(fmt.Sprint(rec["message"]), "email", rec["email"])
+    return nil
+})
+```
+
+See [`examples/stream_records_slog`](examples/stream_records_slog/main.go).
+
+### slog adapter
+
+```go
+h := slog.NewJSONHandler(os.Stdout, nil)
+em := slogadapter.New(h, emit.DefaultFieldMap())
+_ = adapter.Stream(ctx, gen, 25, 0, em)
+```
+
+See [`examples/stream_slog`](examples/stream_slog/main.go).
+
+```go
+import "github.com/Haydn202/Chatterbox/emit"
+
+// Logfmt
+opt, err := chatterbox.WithOutputFormat(emit.FormatLogfmt, emit.Options{})
+gen := chatterbox.NewGenerator(schema, opt, chatterbox.WithSeed(42))
+
+// Plain text
+gen := chatterbox.NewGenerator(schema,
+    chatterbox.WithFormatter(emit.PlainText(emit.PlainTextConfig{})),
+)
+
+// Syslog
+gen := chatterbox.NewGenerator(schema,
+    chatterbox.WithFormatter(emit.Syslog(emit.SyslogConfig{
+        Hostname: "api-1",
+        AppName:  "checkout",
+    })),
+)
+
+// CEF
+gen := chatterbox.NewGenerator(schema,
+    chatterbox.WithFormatter(emit.CEF(emit.CEFConfig{Vendor: "Acme", Product: "API"})),
+)
+
+// Multiline (stack traces on following lines)
+gen := chatterbox.NewGenerator(schema,
+    chatterbox.WithFormatter(emit.MustFormatter(emit.FormatMultiline, emit.Options{
+        Multiline: &emit.TextMultilineConfig{
+            HeaderFields: []string{"timestamp", "level", "message"},
+            BodyFields:   []string{"stacktrace"},
+        },
+    })),
+)
+```
+
+## Correlation and burst traffic
+
+**Trace correlation** — lines that belong together share IDs:
+
+```go
+gen := chatterbox.NewGenerator(schema,
+    chatterbox.WithCorrelation(chatterbox.CorrelationConfig{MinLines: 3, MaxLines: 8}),
+)
+```
+
+**Phased rates** — model normal traffic, spikes, then recovery:
+
+```go
+sched, _ := schedule.PresetIncidentSpike(10, 150, time.Minute, 30*time.Second)
+stream, _ := chatterbox.NewStreamWithSchedule(gen, sched)
+_ = stream.Run(ctx, os.Stdout)
+```
+
+See [docs/GUIDE.md](docs/GUIDE.md#correlation) and [examples/incident_burst](examples/incident_burst/main.go).
 
 ## Rate-limited streaming (live servers)
 

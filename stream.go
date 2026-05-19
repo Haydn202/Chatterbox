@@ -5,13 +5,15 @@ import (
 	"fmt"
 	"io"
 	"time"
+
+	"github.com/Haydn202/Chatterbox/schedule"
 )
 
-// Stream emits logs from a Generator at a fixed rate for a configurable duration.
+// Stream emits logs from a Generator using a rate schedule.
 type Stream struct {
 	gen      *Generator
-	rate     float64       // logs per second
-	duration time.Duration // zero = until context is cancelled
+	sched    schedule.Schedule
+	duration time.Duration // optional total cap (WithStreamDuration)
 }
 
 // StreamConfig configures rate-based emission.
@@ -25,24 +27,18 @@ type StreamConfig struct {
 // StreamOption configures a Stream.
 type StreamOption func(*Stream)
 
-// WithStreamDuration sets how long to emit. Zero means until context cancellation.
+// WithStreamDuration sets an overall wall-clock cap. Zero means no cap (phase durations or ctx apply).
 func WithStreamDuration(d time.Duration) StreamOption {
 	return func(s *Stream) { s.duration = d }
 }
 
-// NewStream creates a rate-limited emitter for gen.
+// NewStream creates a stream at a constant rate.
 func NewStream(gen *Generator, rate float64, opts ...StreamOption) (*Stream, error) {
-	if rate <= 0 {
-		return nil, fmt.Errorf("chatterbox: rate must be positive, got %v", rate)
+	sched, err := schedule.FlatRate(rate)
+	if err != nil {
+		return nil, err
 	}
-	if gen == nil {
-		return nil, fmt.Errorf("chatterbox: generator must not be nil")
-	}
-	s := &Stream{gen: gen, rate: rate}
-	for _, o := range opts {
-		o(s)
-	}
-	return s, nil
+	return NewStreamWithSchedule(gen, sched, opts...)
 }
 
 // NewStreamFromConfig is equivalent to NewStream with cfg.Rate and cfg.Duration.
@@ -50,50 +46,36 @@ func NewStreamFromConfig(gen *Generator, cfg StreamConfig) (*Stream, error) {
 	if cfg.Rate <= 0 {
 		return nil, fmt.Errorf("chatterbox: rate must be positive, got %v", cfg.Rate)
 	}
-	return NewStream(gen, cfg.Rate, WithStreamDuration(cfg.Duration))
+	s, err := NewStream(gen, cfg.Rate, WithStreamDuration(cfg.Duration))
+	if err != nil {
+		return nil, err
+	}
+	return s, nil
 }
 
-// Run writes formatted logs to w at the configured rate until duration elapses,
-// ctx is cancelled, or an I/O error occurs. Returns nil when duration completes
-// normally; returns ctx.Err() when cancelled.
+// NewStreamWithSchedule creates a stream driven by sched.
+func NewStreamWithSchedule(gen *Generator, sched schedule.Schedule, opts ...StreamOption) (*Stream, error) {
+	if gen == nil {
+		return nil, fmt.Errorf("chatterbox: generator must not be nil")
+	}
+	if sched == nil {
+		return nil, fmt.Errorf("chatterbox: schedule must not be nil")
+	}
+	s := &Stream{gen: gen, sched: sched}
+	for _, o := range opts {
+		o(s)
+	}
+	return s, nil
+}
+
+// Run writes formatted logs to w until ctx is cancelled, the schedule ends, or duration cap elapses.
 func (s *Stream) Run(ctx context.Context, w io.Writer) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-
-	interval := time.Duration(float64(time.Second) / s.rate)
-	if interval < time.Microsecond {
-		interval = time.Microsecond
-	}
-
-	var deadline time.Time
-	if s.duration > 0 {
-		deadline = time.Now().Add(s.duration)
-	}
-
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-
-	for {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		if !deadline.IsZero() && !time.Now().Before(deadline) {
-			return nil
-		}
-
+	return runScheduled(ctx, s.sched, s.duration, func() error {
 		b, err := s.gen.NextFormatted()
 		if err != nil {
 			return err
 		}
-		if _, err := w.Write(b); err != nil {
-			return err
-		}
-
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-ticker.C:
-		}
-	}
+		_, err = w.Write(b)
+		return err
+	})
 }

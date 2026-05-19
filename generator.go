@@ -9,9 +9,10 @@ import (
 
 // Generator produces log lines from a schema.
 type Generator struct {
-	schema    *Schema
-	rng       *rand.Rand
-	formatter emit.Formatter
+	schema      *Schema
+	rng         *rand.Rand
+	formatter   emit.Formatter
+	correlation *correlationState
 }
 
 // GeneratorOption configures a Generator.
@@ -50,6 +51,7 @@ func (g *Generator) Next() map[string]any {
 	for _, f := range g.schema.fields {
 		record[f.Name] = f.Fuzzer.Generate(g.rng)
 	}
+	g.applyCorrelation(record)
 	return record
 }
 
